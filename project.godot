@@ -1,0 +1,41 @@
+; Engine configuration file.
+; SoupOut · Godot 4.x · 2D 俯视
+; 项目设置对齐 A0001M06F01（硬约束）：
+;   canvas_items 拉伸 / expand 宽屏 / integer 整数缩放 / Nearest 纹理过滤
+config_version=5
+
+[application]
+
+config/name="SoupOut"
+config/description="一口汤锅，4 个食材各占一角。按住扩张把自己的汤铺出去。"
+run/main_scene="res://src/app/main.tscn"
+config/features=PackedStringArray("4.2", "GL Compatibility")
+config/icon="res://icon.svg"
+
+[display]
+
+window/size/viewport_width=1920
+window/size/viewport_height=1080
+window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
+window/stretch/scale_mode="integer"
+window/handheld/orientation=1
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+textures/canvas_textures/default_texture_filter=0
+; 0 = Nearest（马赛克基调的技术前提，A0001M06F01）
+; ⚠️ 唯一例外：地盘场 field 纹理必须在材质上单独覆盖为 Linear（T0005M07F05），
+;    在 territory_renderer.gd 里显式设置，Review 时不要改回 Nearest。
+
+[audio]
+
+; 总线树在代码里构建（audio_manager.gd），见 A0001M02F03：
+; Master ─ Music / Ambience / SFX(Self,Others) / UI
+
+[autoload]
+
+; 服务定位走主场景 app.gd 挂载（保持场景树清晰），
+; 无 autoload —— 单测模式下直接用 app 单例接口。

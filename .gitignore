@@ -1,0 +1,12 @@
+# Godot 4 缓存与导入产物
+.godot/
+*.import
+
+# macOS
+.DS_Store
+
+# 本地埋点日志（T0001M01F01：平衡数据写本地日志文件，不入库）
+*.log
+
+# 会话元数据（Reasonix 工作区状态，不入库）
+.reasonix/
