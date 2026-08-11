@@ -37,19 +37,25 @@ func _build_bus_tree() -> void:
 	var master := AudioServer.get_bus_index("Master")
 	while AudioServer.get_bus_count() > 1:
 		AudioServer.remove_bus(1)
-	var music := AudioServer.add_bus()
+	AudioServer.add_bus()
+	var music := AudioServer.bus_count - 1
 	AudioServer.set_bus_name(music, "Music")
-	var amb := AudioServer.add_bus()
+	AudioServer.add_bus()
+	var amb := AudioServer.bus_count - 1
 	AudioServer.set_bus_name(amb, "Ambience")
-	var sfx := AudioServer.add_bus()
+	AudioServer.add_bus()
+	var sfx := AudioServer.bus_count - 1
 	AudioServer.set_bus_name(sfx, "SFX")
-	var self_bus := AudioServer.add_bus()
+	AudioServer.add_bus()
+	var self_bus := AudioServer.bus_count - 1
 	AudioServer.set_bus_name(self_bus, "Self")
-	AudioServer.set_bus_parent(self_bus, sfx)
-	var others := AudioServer.add_bus()
+	AudioServer.set_bus_send(self_bus, "SFX")
+	AudioServer.add_bus()
+	var others := AudioServer.bus_count - 1
 	AudioServer.set_bus_name(others, "Others")
-	AudioServer.set_bus_parent(others, sfx)
-	var ui := AudioServer.add_bus()
+	AudioServer.set_bus_send(others, "SFX")
+	AudioServer.add_bus()
+	var ui := AudioServer.bus_count - 1
 	AudioServer.set_bus_name(ui, "UI")
 	_buses[Bus.MUSIC] = music
 	_buses[Bus.AMBIENCE] = amb
@@ -83,7 +89,7 @@ func play(name: String, stream: AudioStream, bus: int = Bus.SFX_OTHERS,
 	last_played[name] = now
 	# 距离衰减：屏幕外不播（A0001M02F02）
 	if ctx != Vector2.ZERO and position != Vector2.ZERO:
-		var view := get_viewport_rect().size
+		var view := DisplayServer.window_get_size()
 		var screen_dist := (position - ctx).length()
 		if screen_dist > maxf(view.x, view.y) * 0.9:
 			return

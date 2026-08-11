@@ -31,7 +31,7 @@ var transport: ISoupTransport = null          # 网络层（fake 或 udp，上�
 var audio_mgr: AudioManager = null            # 音频薄层
 var sfx: SfxBus = null                        # SFX 接口
 var flow_root: Control = null                 # 全流程 UI 容器
-var battle_root: Node2D = null                # 对局容器
+var battle_root: Node = null                # 对局容器
 var local_authority: LocalAuthority = null    # 单机本地权威（P0 主交付）
 
 # ── 玩家本地偏好（A0001M13F03：主菜单选偏好，进房自动发一次）──────────────────
@@ -39,6 +39,7 @@ var nickname: String = "食材"
 var ingredient_pref: int = 0                  # 0..3 → 排骨/紫菜/玉米/茄子
 var my_player_id: int = 0
 var my_room_code: String = ""
+var bot_count_pref: int = 3                   # 人机练习：1~3 个 Bot（=2~4 人局），结算「再来一锅」复用
 
 # ── 服务端下发的会话参数（T0005M14F01-4：不得硬编码，从服务端读）──────────────
 var reconnect_grace_s: float = 20.0           # 默认 20s（T0001M01F02），等待下发覆盖
@@ -68,6 +69,8 @@ var _pending_keyframe: PackedByteArray = PackedByteArray()
 
 func _ready() -> void:
 	instance = self
+	# 全局主题(胡闹厨房式卡通 UI):挂在根窗口,所有 Control 自动继承
+	get_window().theme = UiKit.build_theme()
 	_register_services()
 	_build_flow_root()
 	set_ui_state(UIState.LOGIN)
@@ -111,6 +114,10 @@ func _show_flow(screen: Control) -> void:
 	for child in flow_root.get_children():
 		child.queue_free()
 	if screen != null:
+		# 必须铺满 flow_root：否则 screen 的 size 是 (0,0)，
+		# 它内部所有 PRESET_FULL_RECT / PRESET_CENTER / CenterContainer
+		# 都相对这个零尺寸矩形解算，整页控件会全部堆到左上角。
+		screen.set_anchors_preset(Control.PRESET_FULL_RECT)
 		flow_root.add_child(screen)
 
 
@@ -118,6 +125,9 @@ func _show_flow(screen: Control) -> void:
 
 func on_login_done(nick: String) -> void:
 	nickname = nick
+	# 落盘：主菜单右上角与下次启动的默认值都读 SettingsDb，
+	# 不写回的话这次输入的名字在菜单上根本不显示。
+	SettingsDb.set_value("nickname", nick)
 	set_ui_state(UIState.MAIN_MENU)
 	_show_flow(preload("res://src/ui/flow/main_menu.gd").new())
 
@@ -140,9 +150,19 @@ func on_join_room(code4: String) -> void:
 	_show_flow(preload("res://src/ui/flow/matchmaking.gd").new())
 
 
-func on_solo_play() -> void:
+func on_practice_room() -> void:
+	## 人机练习房（本地，不联网）：选 Bot 数量 → 开锅。
+	## 联机路径协议未对齐，这条是目前唯一真能玩的入口，所以在主菜单是主按钮。
+	_teardown_transport()
+	_show_flow(preload("res://src/ui/flow/local_room_screen.gd").new())
+	set_ui_state(UIState.ROOM)
+
+
+func on_solo_play(bot_count: int = 3) -> void:
 	## 单机原型模式（T0005M13F05：P0 主要交付物）：
 	## fake_transport 环回 + 本地权威，上层无感知。
+	bot_count = clampi(bot_count, 1, 3)
+	bot_count_pref = bot_count
 	_teardown_transport()
 	var fake := FakeTransport.new()
 	fake.set_fault(false, 0.0, 0.0, 0.0, 0.0, false, 0.0)   # 无故障注入
@@ -154,7 +174,7 @@ func on_solo_play() -> void:
 	local_authority = LocalAuthority.new()
 	local_authority.name = "LocalAuthority"
 	add_child(local_authority)
-	local_authority.begin_match(nickname, ingredient_pref)
+	local_authority.begin_match(nickname, ingredient_pref, bot_count)
 	fake.attach_local_authority(local_authority)
 	local_authority.attach_transport(fake)
 	transport.connect_to("localhost", 0, PackedByteArray())   # 环回：置 OPEN
@@ -173,7 +193,7 @@ func on_set_ready(ready: bool) -> void:
 
 func on_leave_room() -> void:
 	_send_lobby(MsgIds.LEAVE_ROOM, PackedByteArray())
-	_on_back_to_menu()
+	on_back_to_menu()
 
 
 func on_back_to_menu() -> void:
@@ -190,8 +210,9 @@ func on_show_settings() -> void:
 	set_ui_state(UIState.SETTINGS)
 
 
-func on_show_char_select() -> void:
+func on_show_char_select(return_to_practice: bool = false) -> void:
 	var screen := preload("res://src/ui/flow/char_select.gd").new()
+	screen.return_to_practice = return_to_practice
 	_show_flow(screen)
 	set_ui_state(UIState.CHAR_SELECT)
 
@@ -345,6 +366,10 @@ func _show_room() -> void:
 
 func _start_match_ui(match_start: Dictionary, keyframe: PackedByteArray) -> void:
 	_end_battle()
+	# 进局前清掉上一屏：原来只 _end_battle()，上一个 flow 屏会整块留在
+	# 战斗世界底下 —— 看不见，但按钮还活着（房间的「开锅」、结算的「再来一锅」
+	# 就压在战场上），点到直接重开一局。
+	_show_flow(null)
 	in_match = true
 	set_ui_state(UIState.IN_MATCH)
 	var scene := load(SCENE_BATTLE) as PackedScene

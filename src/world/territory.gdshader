@@ -74,7 +74,15 @@ float pattern_for(int owner, vec2 pixel) {
 	return 0.5 + 0.5 * sin(pixel.x * 0.05 + anim_time * 0.3);
 }
 
+// 锅体遮罩：地盘场是铺满 48×48 的方形贴图，锅外必须裁掉，
+// 否则锅沿在画面上完全看不出来（原汤色一直铺到屏幕边）。
+// UV 空间里锅心在 (0.5,0.5)、锅半径 24/48 = 0.5。
+uniform float pot_radius_uv = 0.5;
+
 void fragment() {
+	if (distance(UV, vec2(0.5)) > pot_radius_uv) {
+		discard;
+	}
 	vec4 c = texture(field, UV);
 
 	// ① 等值线：top1/top2 差分（双线性已平滑）

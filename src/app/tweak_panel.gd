@@ -42,7 +42,7 @@ func _build() -> void:
 	_expand_slider.min_value = KNOB_EXPAND_RATE_MIN
 	_expand_slider.max_value = KNOB_EXPAND_RATE_MAX
 	_expand_slider.step = 1
-	_expand_slider.value = 64
+	_expand_slider.value = 256
 	_expand_slider.value_changed.connect(_on_expand_changed)
 	vbox.add_child(_expand_slider)
 
@@ -70,7 +70,7 @@ func _build() -> void:
 func _on_expand_changed(v: float) -> void:
 	var fixed_v := int(v)
 	battle.set_expand_rate_fixed(fixed_v)
-	_label_expand.text = "expandRate = %d (Q22.10 定点，默认 64)" % fixed_v
+	_label_expand.text = "expandRate = %d（默认已拉满 256）" % fixed_v
 
 
 func _on_speed_changed(v: float) -> void:

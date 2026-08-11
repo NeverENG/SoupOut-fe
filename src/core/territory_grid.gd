@@ -188,7 +188,7 @@ func expand_tick(player_id: int, input_tick: int) -> void:
 			pred_tick[cell] = input_tick
 			dirty[cell] = 1
 			rinc += 1
-			_push_neighbors(player_id, cell, seen)
+			_push_neighbors(player_id, cell, top.dist, seen)
 		# 敌方/锅外：停在这里，等服务端裁决
 
 
@@ -211,8 +211,8 @@ func _build_frontier(player_id: int) -> void:
 				continue
 			var is_boundary := false
 			for nb in _neighbor_offsets():
-				var nx := x + nb.x
-				var ny := y + nb.y
+				var nx: int = x + nb.x
+				var ny: int = y + nb.y
 				if not in_bounds(nx, ny):
 					continue
 				var nv := auth_grid[ny * grid_w + nx]
@@ -220,23 +220,32 @@ func _build_frontier(player_id: int) -> void:
 					is_boundary = true
 					break
 			if is_boundary:
-				# 边界外邻的 dist = 到边界的距离（0 起步），推进时按邻接累加
-				_push_into(player_id, x, y, 0, seen)
+				# 压进堆的必须是「边界格的**外邻**」，不是边界格自己 ——
+				# 自己的格弹出来时既不满足「只吃原汤」也不推邻居，堆一空扩张就永久停摆。
+				for nb2 in _neighbor_offsets():
+					var bx: int = x + nb2.x
+					var by: int = y + nb2.y
+					if not in_bounds(bx, by):
+						continue
+					if auth_grid[by * grid_w + bx] == player_id:
+						continue
+					_push_into(player_id, bx, by, Fixed.geodesic_dist(nb2.x, nb2.y), seen)
 
 
-func _push_neighbors(player_id: int, cell: int, seen: Dictionary) -> void:
+## base_dist = 父格已经走过的测地距离。不累加的话所有格都停在一个增量上，
+## R 一过 11 就全盘同时被吃掉，扩张就不是「从边界漫开」而是瞬间铺满。
+func _push_neighbors(player_id: int, cell: int, base_dist: int, seen: Dictionary) -> void:
 	var x := cell % grid_w
 	var y := cell / grid_w
 	for nb in _neighbor_offsets():
-		var nx := x + nb.x
-		var ny := y + nb.y
+		var nx: int = x + nb.x
+		var ny: int = y + nb.y
 		if not in_bounds(nx, ny):
 			continue
-		var nidx := ny * grid_w + nx
+		var nidx: int = ny * grid_w + nx
 		if pred_owner[nidx] == player_id or seen.has(nidx):
 			continue
-		var dist := Fixed.geodesic_dist(nb.x, nb.y)
-		_push_into(player_id, nx, ny, dist, seen)
+		_push_into(player_id, nx, ny, base_dist + Fixed.geodesic_dist(nb.x, nb.y), seen)
 
 
 func _push_into(player_id: int, x: int, y: int, dist: int, seen: Dictionary) -> void:

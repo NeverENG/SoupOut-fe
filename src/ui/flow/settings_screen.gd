@@ -1,7 +1,8 @@
 ## settings_screen.gd — 设置（A0001M13F06）
-## 操作（摇杆灵敏度/长按判定/浮动摇杆）/ 画面（震屏强度含关闭档/顿帧/粒子）/ 
+## 操作（摇杆灵敏度/长按判定/浮动摇杆）/ 画面（震屏强度含关闭档/顿帧/粒子）/
 ## 可读性（色盲模式/图案强度/UI 缩放）/ 音频（主/音乐/音效 → Bus）/ 账号（昵称）
 ## 震屏强度必须能关（无障碍底线，M12F03）。
+## 视觉：厨房背景 + 居中奶油大卡，行内滚动；分区用 HSeparator + 橙字小标。
 
 extends Control
 
@@ -9,20 +10,40 @@ var from_ui_state: int = -1
 
 
 func _ready() -> void:
-	UiKit.full_rect_bg(self, Color(0.15, 0.11, 0.08))
-	var title := UiKit.make_label("设置", 44, Color(0.95, 0.85, 0.6))
-	title.set_anchors_preset(Control.PRESET_TOP_WIDE)
-	title.position = Vector2(0, 40)
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	add_child(title)
+	UiKit.kitchen_bg(self)
+
+	var margin := MarginContainer.new()
+	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
+	for side in ["left", "right"]:
+		margin.add_theme_constant_override("margin_" + side, 64)
+	for side in ["top", "bottom"]:
+		margin.add_theme_constant_override("margin_" + side, 40)
+	add_child(margin)
+
+	var root := VBoxContainer.new()
+	root.add_theme_constant_override("separation", 24)
+	margin.add_child(root)
+
+	var title := UiKit.make_title("设置", 56)
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	root.add_child(title)
+
+	var card := UiKit.make_panel()
+	card.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	card.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	root.add_child(card)
+	var pad := MarginContainer.new()
+	for side in ["left", "right", "top", "bottom"]:
+		pad.add_theme_constant_override("margin_" + side, 32)
+	card.add_child(pad)
 
 	var scroll := ScrollContainer.new()
-	scroll.set_anchors_preset(Control.PRESET_FULL_RECT)
-	scroll.position = Vector2(0, 120)
-	add_child(scroll)
+	scroll.custom_minimum_size = Vector2(980, 0)
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	pad.add_child(scroll)
 	var vbox := VBoxContainer.new()
-	vbox.custom_minimum_size = Vector2(1600, 0)
-	vbox.add_theme_constant_override("separation", 18)
+	vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	vbox.add_theme_constant_override("separation", 14)
 	scroll.add_child(vbox)
 
 	vbox.add_child(_section("音频"))
@@ -44,30 +65,38 @@ func _ready() -> void:
 	vbox.add_child(_section("可读性"))
 	vbox.add_child(_check_row("色盲模式（提高地盘图案对比度）", "colorblind_mode"))
 
-	var back := UiKit.make_button("返回", Vector2(320, 72))
-	back.set_anchors_preset(Control.PRESET_BOTTOM_CENTER)
-	back.position = Vector2(-160, -60)
+	var back := UiKit.make_button("返回", Vector2(320, 80))
+	back.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	back.pressed.connect(_back)
-	add_child(back)
+	root.add_child(back)
 
 
-func _section(name: String) -> Label:
-	var l := UiKit.make_label(name, 26, Color(0.95, 0.8, 0.5))
-	l.add_theme_constant_override("outline_size", 0)
-	return l
+## 分区头：细分隔线 + 橙色小标（分隔线颜色压得很淡，别把卡片切碎）
+func _section(heading: String) -> Control:
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 8)
+	var sep := HSeparator.new()
+	sep.add_theme_stylebox_override("separator", UiKit.sb(Color(0.55, 0.38, 0.22, 0.22), Color.TRANSPARENT, 0, 2))
+	box.add_child(sep)
+	var l := UiKit.make_label(heading, 28, UiKit.ORANGE_DARK)
+	box.add_child(l)
+	return box
 
 
 func _slider_row(label_text: String, key: String, lo: float, hi: float) -> HBoxContainer:
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 16)
-	var label := UiKit.make_label(label_text, 20, Color(0.85, 0.75, 0.6))
+	var label := UiKit.make_label(label_text, 26, UiKit.INK_SOFT)
 	label.custom_minimum_size = Vector2(420, 0)
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	row.add_child(label)
 	var slider := HSlider.new()
 	slider.min_value = lo
 	slider.max_value = hi
 	slider.step = 0.01
-	slider.custom_minimum_size = Vector2(400, 0)
+	slider.custom_minimum_size = Vector2(420, 0)
+	slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	slider.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	slider.value = SettingsDb.get_float(key, UiKit_default(key))
 	slider.value_changed.connect(func(v: float): SettingsDb.set_value(key, v))
 	row.add_child(slider)
@@ -78,6 +107,7 @@ func _check_row(label_text: String, key: String) -> HBoxContainer:
 	var row := HBoxContainer.new()
 	var cb := CheckBox.new()
 	cb.text = tr(label_text)
+	cb.add_theme_font_size_override("font_size", 26)
 	cb.button_pressed = SettingsDb.get_bool(key, false)
 	cb.toggled.connect(func(v: bool): SettingsDb.set_value(key, v))
 	row.add_child(cb)

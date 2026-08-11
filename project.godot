@@ -1,15 +1,30 @@
 ; Engine configuration file.
-; SoupOut · Godot 4.x · 2D 俯视
-; 项目设置对齐 A0001M06F01（硬约束）：
-;   canvas_items 拉伸 / expand 宽屏 / integer 整数缩放 / Nearest 纹理过滤
+; It's best edited using the editor UI and not directly,
+; since the parameters that go here are not all obvious.
+;
+; Format:
+;   [section] ; section goes between []
+;   param=value ; assign values to parameters
+
+; SoupOut · Godot 4.x · 2.5D（3D 世界 + 倾斜正交相机,胡闹厨房式美术）
+; 视觉改版说明:
+;   - 世界层已从 2D 俯视升级为 3D(倾斜 55° 正交相机 = 逃跑吧少年式 2.5D 视角)
+;   - UI 仍为 canvas_items 拉伸;scale_mode 从 integer 改为 fractional
+;     (3D 画面始终按原生分辨率渲染,整数缩放会让 HUD 跳档并留黑边)
+;   - 全局 Nearest 纹理过滤仅作用于 2D canvas;3D 材质按各自设置走
+
 config_version=5
+
+[animation]
+
+compatibility/default_parent_skeleton_in_mesh_instance_3d=true
 
 [application]
 
 config/name="SoupOut"
 config/description="一口汤锅，4 个食材各占一角。按住扩张把自己的汤铺出去。"
 run/main_scene="res://src/app/main.tscn"
-config/features=PackedStringArray("4.2", "GL Compatibility")
+config/features=PackedStringArray("4.7", "GL Compatibility")
 config/icon="res://icon.svg"
 
 [display]
@@ -18,24 +33,20 @@ window/size/viewport_width=1920
 window/size/viewport_height=1080
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
-window/stretch/scale_mode="integer"
+window/stretch/scale_mode="fractional"
 window/handheld/orientation=1
+
+[gui]
+
+; 项目级主题(UiKit.build_theme 生成,见 assets/ui/):
+; UI 大量挂在 CanvasLayer/普通 Node 下,窗口主题沿 Control 链够不到,必须走项目级兜底
+theme/custom="res://assets/ui/soup_theme.tres"
 
 [rendering]
 
+textures/canvas_textures/default_texture_filter=0
 renderer/rendering_method="gl_compatibility"
 renderer/rendering_method.mobile="gl_compatibility"
-textures/canvas_textures/default_texture_filter=0
-; 0 = Nearest（马赛克基调的技术前提，A0001M06F01）
-; ⚠️ 唯一例外：地盘场 field 纹理必须在材质上单独覆盖为 Linear（T0005M07F05），
-;    在 territory_renderer.gd 里显式设置，Review 时不要改回 Nearest。
-
-[audio]
-
-; 总线树在代码里构建（audio_manager.gd），见 A0001M02F03：
-; Master ─ Music / Ambience / SFX(Self,Others) / UI
-
-[autoload]
-
-; 服务定位走主场景 app.gd 挂载（保持场景树清晰），
-; 无 autoload —— 单测模式下直接用 app 单例接口。
+anti_aliasing/quality/msaa_3d=2
+lights_and_shadows/directional_shadow/size=4096
+lights_and_shadows/directional_shadow/soft_shadow_filter_quality=2

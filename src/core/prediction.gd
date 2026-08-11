@@ -42,18 +42,22 @@ func record_input(seq: int, move_x: int, move_y: int, aim: int, buttons: int,
 	var slot := head
 	head = (head + 1) % BUFFER_SIZE
 	latest_seq = seq
-	var inp := inputs[slot]
+	var inp: Dictionary = inputs[slot]
 	inp.seq = seq
 	inp.move_x = move_x
 	inp.move_y = move_y
 	inp.aim = aim
 	inp.buttons = buttons
-	var p := predicted[slot]
-	var step := Sim.step(p.x, p.y, move_x, move_y, speed_fixed)
-	p.x = step.x
-	p.y = step.y
-	auth_x = p.x
-	auth_y = p.y
+	# 从**当前**预测位置往前推一步，然后把结果存进本槽。
+	# 原来是从 predicted[slot] 起步 —— 那是 64 帧之前的陈旧值（hard_set 还会把
+	# 所有槽填成同一个位置），结果每次输入都从上次权威修正的地方重新走一步，
+	# 预测位置永远只前进一步，联网时本地预测等于没有。
+	var step := Sim.step(auth_x, auth_y, move_x, move_y, speed_fixed)
+	auth_x = step.x
+	auth_y = step.y
+	var p: Dictionary = predicted[slot]
+	p.x = auth_x
+	p.y = auth_y
 
 
 ## 用权威位置初始化（复活/重连，M09F04）

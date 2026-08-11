@@ -1,67 +1,115 @@
 ## char_select.gd — 角色选择（A0001M13F03）
-## 四食材横排大卡：排骨/紫菜/玉米/茄子；卡内立绘+名字+地盘色样块。
+## 四食材横排大卡：番茄/青菜/玉米/紫芋（配色/名字统一走 UiKit，与地盘 shader 一致）。
 ## 「外观不同，实力一样」无差异声明。主菜单选择是本地偏好（T0005M14F03-4）。
+## 视觉：奶油大卡 + 色样圆 + 名字；选中卡放大 1.06 并换橙色描边，悬停走 UiKit.bounce。
 
 extends Control
 
-const NAMES := ["排骨", "紫菜", "玉米", "茄子"]
-const COLORS := [Color(0.949, 0.565, 0.608), Color(0.18, 0.604, 0.525),
-	Color(1.0, 0.824, 0.118), Color(0.545, 0.361, 0.839)]
-const ICONS := ["🍖", "🥬", "🌽", "🍆"]
+const ICONS := ["🍅", "🥬", "🌽", "🍠"]
+const CARD_SIZE := Vector2(250, 340)
 
 var selected: int = App.instance.ingredient_pref if App.instance != null else 0
+## 从人机练习房进来时置 true：确认后回房而不是回主菜单（否则改个食材要重走一遍菜单）
+var return_to_practice: bool = false
+
+var _card_wraps: Array = []
+var _card_btns: Array = []
 
 
 func _ready() -> void:
-	UiKit.full_rect_bg(self, Color(0.16, 0.11, 0.08))
-	var title := UiKit.make_label("选个食材下锅", 48, Color(0.95, 0.85, 0.6))
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.set_anchors_preset(Control.PRESET_TOP_WIDE)
-	title.position = Vector2(0, 60)
-	add_child(title)
-	var note := UiKit.make_label("外观不同，实力一样", 20, Color(0.85, 0.75, 0.6))
-	note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	note.set_anchors_preset(Control.PRESET_TOP_WIDE)
-	note.position = Vector2(0, 130)
-	add_child(note)
+	UiKit.kitchen_bg(self)
+
+	var margin := MarginContainer.new()
+	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
+	for side in ["left", "right", "top", "bottom"]:
+		margin.add_theme_constant_override("margin_" + side, 56)
+	add_child(margin)
+
+	var root := VBoxContainer.new()
+	root.alignment = BoxContainer.ALIGNMENT_CENTER
+	root.add_theme_constant_override("separation", 28)
+	margin.add_child(root)
+
+	var title := UiKit.make_title("选个食材下锅", 60)
+	root.add_child(title)
+	var note := UiKit.make_title("外观不同，实力一样", 24, UiKit.YELLOW)
+	root.add_child(note)
 
 	var cards := HBoxContainer.new()
-	cards.set_anchors_preset(Control.PRESET_CENTER)
-	cards.position = Vector2(-520, -160)
-	cards.add_theme_constant_override("separation", 24)
-	add_child(cards)
+	cards.alignment = BoxContainer.ALIGNMENT_CENTER
+	cards.add_theme_constant_override("separation", 32)
+	root.add_child(cards)
+	_card_wraps.clear()
+	_card_btns.clear()
 	for i in range(4):
 		var idx := i
-		var card := Button.new()
-		card.custom_minimum_size = Vector2(240, 300)
-		card.text = "%s\n%s" % [ICONS[idx], NAMES[idx]]
-		card.add_theme_font_size_override("font_size", 34)
-		card.modulate = COLORS[idx]
-		card.pressed.connect(func(): _select(idx))
-		cards.add_child(card)
-		# 地盘色样块
-		var swatch := ColorRect.new()
-		swatch.color = COLORS[idx]
-		swatch.custom_minimum_size = Vector2(240, 12)
-		cards.add_child(swatch)
+		# 外层 wrapper 承接「选中放大」，内层按钮承接 UiKit.bounce 悬停——
+		# 两层各管各的 scale，互不打架。
+		var wrap := Control.new()
+		wrap.custom_minimum_size = CARD_SIZE
+		wrap.resized.connect(func() -> void: wrap.pivot_offset = wrap.size / 2.0)
+		cards.add_child(wrap)
+		var btn := Button.new()
+		btn.set_anchors_preset(Control.PRESET_FULL_RECT)
+		btn.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+		btn.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+		btn.pressed.connect(func(): _select(idx))
+		UiKit.bounce(btn)
+		wrap.add_child(btn)
+		var vb := VBoxContainer.new()
+		vb.set_anchors_preset(Control.PRESET_FULL_RECT)
+		vb.alignment = BoxContainer.ALIGNMENT_CENTER
+		vb.add_theme_constant_override("separation", 12)
+		vb.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		btn.add_child(vb)
+		var icon := UiKit.make_label(ICONS[idx], 84)
+		icon.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		vb.add_child(icon)
+		var name_l := UiKit.make_label(UiKit.INGREDIENT_NAMES[idx], 34, UiKit.P_DARKS[idx])
+		name_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		vb.add_child(name_l)
+		var swatch := UiKit.icon_swatch(UiKit.P_COLORS[idx], 52)
+		swatch.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		swatch.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		vb.add_child(swatch)
+		_card_wraps.append(wrap)
+		_card_btns.append(btn)
 
-	var confirm := UiKit.make_button("就它了", Vector2(360, 80))
-	confirm.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
-	confirm.position = Vector2(-400, -80)
+	var confirm := UiKit.make_button("就它了", Vector2(380, 92), UiKit.Btn.SUCCESS, 34)
+	confirm.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	confirm.pressed.connect(_confirm)
-	add_child(confirm)
-	_rebuild_cards()
+	root.add_child(confirm)
+	_refresh_cards()
 
 
 func _select(idx: int) -> void:
 	selected = idx
-	_rebuild_cards()
+	_refresh_cards()
 
 
-func _rebuild_cards() -> void:
-	pass   # 选中态由 modulate 表现（保持简单占位）
+## 选中态：橙描边 + 放大 1.06；未选中回奶油描边、还原大小。
+func _refresh_cards() -> void:
+	for i in range(_card_btns.size()):
+		var btn: Button = _card_btns[i]
+		var wrap: Control = _card_wraps[i]
+		var chosen := i == selected
+		var border := UiKit.ORANGE if chosen else UiKit.WOOD
+		var bw := 6 if chosen else 4
+		btn.add_theme_stylebox_override("normal", UiKit.sb(UiKit.CREAM, border, bw, 24, 10 if chosen else 8))
+		btn.add_theme_stylebox_override("hover", UiKit.sb(Color("fffbef"), border, bw, 24, 10))
+		btn.add_theme_stylebox_override("pressed", UiKit.sb(UiKit.CREAM_DARK, border, bw, 24, 2))
+		var target := Vector2(1.06, 1.06) if chosen else Vector2.ONE
+		if wrap.is_inside_tree():
+			var tw := wrap.create_tween()
+			tw.set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
+			tw.tween_property(wrap, "scale", target, 0.18)
+		else:
+			wrap.scale = target
 
 
 func _confirm() -> void:
 	App.instance.on_select_ingredient(selected)
-	App.instance.on_back_to_menu()
+	if return_to_practice:
+		App.instance.on_practice_room()
+	else:
+		App.instance.on_back_to_menu()

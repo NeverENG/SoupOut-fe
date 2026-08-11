@@ -66,6 +66,19 @@ func is_charging(player_id: int) -> bool:
 	return p.get("state_flags", 0) & MsgIds.FLAG_CHARGING != 0
 
 
+## 本局实际在场的玩家 id（升序）。
+## HUD 排名的分母以前写死 4，2/3 人局会显示「2/4」。
+func player_ids() -> Array:
+	var ids: Array = players.keys()
+	ids.sort()
+	return ids
+
+
+func is_vaulting(player_id: int) -> bool:
+	var p := get_player(player_id)
+	return p.get("state_flags", 0) & MsgIds.FLAG_VAULTING != 0
+
+
 func is_overweight(player_id: int) -> bool:
 	var p := get_player(player_id)
 	return p.get("state_flags", 0) & MsgIds.FLAG_OVERWEIGHT != 0
@@ -73,5 +86,9 @@ func is_overweight(player_id: int) -> bool:
 
 func my_area_permyriad() -> int:
 	## mass 由面积派生、服务器算好下发（T0001M02F05：客户端不重算）
-	var p := get_player(my_id)
-	return int(p.get("mass", 0))
+	return area_permyriad_of(my_id)
+
+
+## 任意玩家的面积万分比（头顶信息条与领先者标记要用）
+func area_permyriad_of(player_id: int) -> int:
+	return int(get_player(player_id).get("mass", 0))

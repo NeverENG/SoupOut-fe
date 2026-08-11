@@ -1,9 +1,21 @@
-## map_data.gd — 地图定义（A0001M09：严格 4 重旋转对称 · 5 组团 · 8 板 12 窗 · 13 墙）
+## map_data.gd — 地图定义（A0001M09 的数量约束已按「地图要更复杂」的要求打破）
 ## 坐标系：世界 48×48，锅心 (24,24)，锅半径 24 单位（T0001M01F03）
-## 出生角：θ = 45° + 90°k（P1 右上 / P2 左上 / P3 左下 / P4 右下）
-## 组团：灶台角组团×4（落后者的家）+ 锅心漩涡组团（热区）
-## 数值（A0001M09F03/F04）：长墙 2.4u · 短墙 1.4u · 放射墙 1.2u · 菱形对角 1.6u
-## 绕行代价 D 设计指标 3–6 单位（D0001M03F02）
+##
+## ── 结构：每个象限一个「街区」，锅心一个十字路口 ──────────────────────────
+## 四重旋转对称（四个玩家必须公平），但**象限内部有层次**，不再是一座孤零零的屋：
+##
+##   大屋   三面墙 + 门洞朝锅心 + 两扇窗 + 门口一块板   ← 主绕点
+##   小屋   L 形两面墙 + 一扇窗                        ← 次绕点，短促
+##   夹道   两堵平行墙形成通道，道中卡一块板            ← 一夫当关
+##   散柱   两根玉米段单柱                              ← 微掩体，能贴着绕
+##   外环   仍留开阔汤面 —— 铺地盘的地方，色块要完整
+##
+## 锅心：冻豆腐屋（四面藕孔）+ 四条放射走廊墙 → 十字路口，四条道通向四个象限。
+##
+## ── 建材（汤主题，不用面包那种不下锅的东西）────────────────────────────────
+##   白菜垛 层叠绿 · 心里美萝卜 粉白 · 冻豆腐 暖米黄 · 玉米段 明黄
+##   藕片 = 窗（藕天然有孔，「从藕孔翻过去」比抽象圆环贴题）
+##
 ## 纯 GDScript，不 extends Node（静态数据，可无头单测）。
 
 class_name MapData
@@ -12,15 +24,46 @@ const WORLD := 48.0
 const CENTER := Vector2(24.0, 24.0)
 const POT_RADIUS := 24.0
 
-# 墙
-const WALL_LONG := "wall_long"
-const WALL_SHORT := "wall_short"
-const WALL_DIAMOND := "wall_diamond"
+# ── 布局参数 ──────────────────────────────────────────────────────────────
+const WALL_THICK := 0.45
+const SPAWN_R := 20.4           # 出生点：外环开阔地
+# 大屋
+const HOUSE_R := 10.5
+const HOUSE_HALF := 2.8         # 半宽（沿切向）
+const HOUSE_DEPTH := 2.6        # 半进深（沿径向）
+# 小屋（偏一侧）
+const HUT_R := 16.0
+const HUT_OFF := 5.0            # 切向偏移
+const HUT_LEN := 3.2
+# 夹道（偏另一侧）
+const LANE_R := 15.0
+const LANE_OFF := -5.6
+const LANE_LEN := 4.4
+const LANE_GAP := 2.2           # 通道宽
+# 散柱
+const PILLAR_R := 12.6
+const PILLAR_OFF := 7.6
+const PILLAR_SIZE := 0.9
+# 锅心
+const CORE_HALF := 2.8
+const CORRIDOR_IN := 4.6
+const CORRIDOR_LEN := 3.0
+
+# 墙（食材）
+const WALL_CABBAGE := "wall_cabbage"        # 白菜垛
+const WALL_RADISH := "wall_radish"          # 心里美萝卜
+const WALL_TOFU := "wall_tofu"              # 冻豆腐
+const WALL_CORN := "wall_corn"              # 玉米段
+# 兼容旧命名
+const WALL_LONG := WALL_CABBAGE
+const WALL_SHORT := WALL_RADISH
+const WALL_DIAMOND := WALL_TOFU
 # 板：葱段（外围）/ 姜片（锅心）
 const PALLET_CONG := "pallet_cong"
 const PALLET_JIANG := "pallet_jiang"
-# 窗：漏勺孔 / 锅耳
-const VAULT_LOUSHAO := "vault_loushao"
+# 窗：藕片 / 锅耳
+const VAULT_LOTUS := "vault_lotus"
+const VAULT_LOUSHAO := VAULT_LOTUS
 const VAULT_GUOER := "vault_guoer"
 
 
@@ -37,55 +80,78 @@ static func build_map(map_id: int = 1) -> Dictionary:
 		"pallets": [],
 		"vaults": [],
 	}
-	# ── 灶台角组团 ×4（θ = 45° + 90°k）────────────────────────────────────
+	var wid := 0
+	var vid := 0
+	var pid := 0
+	# ── 四个街区（θ = 45° + 90°k）────────────────────────────────────────
 	for k in range(4):
 		var theta := deg_to_rad(45.0 + 90.0 * k)
-		var dir := Vector2(cos(theta), sin(theta))
-		var tangent := Vector2(-dir.y, dir.x)
-		# 组团中心 r=0.62，出生点 r=0.72（组团外侧偏一点）
-		var group_center := CENTER + dir * (0.62 * POT_RADIUS)
-		var spawn := CENTER + dir * (0.72 * POT_RADIUS)
-		d.spawns.append({"player_id": k + 1, "x": spawn.x, "y": spawn.y, "angle": theta})
-		# 长墙：切向 2.4u，位于组团外侧（挡住外侧+一侧）
-		d.walls.append(_rect_wall(group_center + dir * 1.15, tangent, 2.4, 0.32, WALL_LONG))
-		# 短墙：径向 1.4u，与长墙成 90°（L 形围合）
-		d.walls.append(_rect_wall(group_center - tangent * 0.9, dir, 0.32, 1.4, WALL_SHORT))
-		# 板 ×1：长墙中段外侧通道口（葱段）
-		d.pallets.append({
-			"id": k, "x": (group_center + dir * 1.45).x, "y": (group_center + dir * 1.45).y,
-			"kind": PALLET_CONG, "angle": theta,
-		})
-		# 窗 ×2：长墙正中（漏勺孔）+ 短墙靠外端（锅耳）
-		d.vaults.append({
-			"id": k, "x": (group_center + dir * 1.15).x, "y": (group_center + dir * 1.15).y,
-			"kind": VAULT_LOUSHAO, "angle": theta,
-		})
-		d.vaults.append({
-			"id": k + 4, "x": (group_center - tangent * 0.9).x, "y": (group_center - tangent * 0.9).y,
-			"kind": VAULT_GUOER, "angle": theta + PI / 2,
-		})
-	# ── 锅心漩涡组团（r ≤ 0.30，本身 4 重对称）──────────────────────────────
-	# 中央菱形墙块：对角 1.6u（正方形旋转 45°）
-	d.walls.append(_diamond_wall(CENTER, 1.6, WALL_DIAMOND))
-	# 放射短墙 ×4（θ=0/90/180/270）：放在四人边界交界方向
+		var dir := Vector2(cos(theta), sin(theta))          # 指向锅外
+		var tan := Vector2(-dir.y, dir.x)
+
+		var spawn := CENTER + dir * SPAWN_R
+		d.spawns.append({"player_id": k + 1, "x": spawn.x, "y": spawn.y, "angle": theta + PI})
+
+		# ① 大屋：后墙（白菜）+ 两侧墙（萝卜），门洞朝锅心
+		var hc := CENTER + dir * HOUSE_R
+		d.walls.append(_rect_wall(hc + dir * HOUSE_DEPTH, tan,
+			HOUSE_HALF * 2.0, WALL_THICK, WALL_CABBAGE))
+		for side in [1.0, -1.0]:
+			var sc: Vector2 = hc + tan * (HOUSE_HALF * side)
+			d.walls.append(_rect_wall(sc, dir, HOUSE_DEPTH * 2.0, WALL_THICK, WALL_RADISH))
+		# 窗：后墙正中（藕孔）+ 一侧墙中段（锅耳）
+		var bw: Vector2 = hc + dir * HOUSE_DEPTH
+		d.vaults.append({"id": vid, "x": bw.x, "y": bw.y, "kind": VAULT_LOTUS, "angle": theta})
+		vid += 1
+		var sw: Vector2 = hc + tan * HOUSE_HALF
+		d.vaults.append({"id": vid, "x": sw.x, "y": sw.y,
+			"kind": VAULT_GUOER, "angle": theta + PI / 2})
+		vid += 1
+		# 板：门口
+		var door: Vector2 = hc - dir * HOUSE_DEPTH
+		d.pallets.append({"id": pid, "x": door.x, "y": door.y,
+			"kind": PALLET_CONG, "angle": theta})
+		pid += 1
+
+		# ② 小屋：L 形两面墙 + 一扇藕孔
+		var uc := CENTER + dir * HUT_R + tan * HUT_OFF
+		d.walls.append(_rect_wall(uc, tan, HUT_LEN, WALL_THICK, WALL_CABBAGE))
+		d.walls.append(_rect_wall(uc + dir * (HUT_LEN * 0.5) - tan * (HUT_LEN * 0.5),
+			dir, HUT_LEN, WALL_THICK, WALL_RADISH))
+		d.vaults.append({"id": vid, "x": uc.x, "y": uc.y, "kind": VAULT_LOTUS, "angle": theta})
+		vid += 1
+
+		# ③ 夹道：两堵平行墙（沿径向）+ 道中一块板 —— 一夫当关
+		var lc := CENTER + dir * LANE_R + tan * LANE_OFF
+		for side2 in [1.0, -1.0]:
+			d.walls.append(_rect_wall(lc + tan * (LANE_GAP * 0.5 * side2), dir,
+				LANE_LEN, WALL_THICK, WALL_CABBAGE))
+		d.pallets.append({"id": pid, "x": lc.x, "y": lc.y, "kind": PALLET_CONG, "angle": theta})
+		pid += 1
+
+		# ④ 散柱 ×2（玉米段）：贴着能绕的微掩体
+		for j in range(2):
+			var pc := CENTER + dir * (PILLAR_R + float(j) * 2.6) + tan * (PILLAR_OFF - float(j) * 1.6)
+			d.walls.append(_rect_wall(pc, dir, PILLAR_SIZE, PILLAR_SIZE, WALL_CORN))
+
+	# ── 锅心十字路口：冻豆腐屋 + 四条放射走廊墙 ──────────────────────────
+	d.walls.append(_diamond_wall(CENTER, CORE_HALF * 2.0, WALL_TOFU))
 	for k in range(4):
-		var theta := deg_to_rad(90.0 * k)
-		var dir := Vector2(cos(theta), sin(theta))
-		var start := CENTER + dir * 5.2
-		d.walls.append(_rect_wall(start + dir * 0.6, dir, 0.3, 1.2, WALL_SHORT))
-		# 板 ×4（姜片）：每条放射墙外端的通道口
-		d.pallets.append({
-			"id": 4 + k, "x": (start + dir * 1.6).x, "y": (start + dir * 1.6).y,
-			"kind": PALLET_JIANG, "angle": theta,
-		})
-	# 窗 ×4：中央菱形墙的四条边（漏勺孔，可直接翻进锅心最中央）
-	for k in range(4):
-		var theta := deg_to_rad(45.0 + 90.0 * k)
-		var dir := Vector2(cos(theta), sin(theta))
-		d.vaults.append({
-			"id": 8 + k, "x": (CENTER + dir * 0.85).x, "y": (CENTER + dir * 0.85).y,
-			"kind": VAULT_LOUSHAO, "angle": theta,
-		})
+		var ta := deg_to_rad(45.0 + 90.0 * k)
+		var dd := Vector2(cos(ta), sin(ta))
+		var wv: Vector2 = CENTER + dd * (CORE_HALF * 0.707)
+		d.vaults.append({"id": vid, "x": wv.x, "y": wv.y, "kind": VAULT_LOTUS, "angle": ta})
+		vid += 1
+		# 放射走廊墙（θ=90°k）：把锅心和四个象限之间隔出通道
+		var tb := deg_to_rad(90.0 * k)
+		var db := Vector2(cos(tb), sin(tb))
+		var tb_perp := Vector2(-db.y, db.x)
+		d.walls.append(_rect_wall(CENTER + db * (CORRIDOR_IN + CORRIDOR_LEN * 0.5),
+			db, CORRIDOR_LEN, WALL_THICK, WALL_TOFU))
+		# 板：走廊外端两侧
+		var pv: Vector2 = CENTER + db * (CORRIDOR_IN + CORRIDOR_LEN + 1.1)
+		d.pallets.append({"id": pid, "x": pv.x, "y": pv.y, "kind": PALLET_JIANG, "angle": tb})
+		pid += 1
 	return d
 
 

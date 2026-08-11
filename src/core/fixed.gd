@@ -7,7 +7,8 @@
 class_name Fixed
 
 const POS_SCALE := 64          # 位置 1/64 世界单位
-const VEL_SCALE := 16          # 速度 1/16 单位/tick
+const VEL_SCALE := 16          # 速度 1/16 单位/**秒**（D0001M02 主属性表的移速列就是 单位/s）
+const TICK_HZ := 20            # 权威 tick 率；速度换算成每 tick 位移必须除它
 const R_SCALE := 1024          # 扩张半径 / 测地距离 1/1024 格
 const SQRT2_FIXED := 1448      # round(1024 × √2) —— 必须与 Go 侧逐位一致（两端单测，M13F03）
 const CHAMFER_ORTHO := 8       # Chamfer 距离正交步长（D0001M05F01）
@@ -53,13 +54,18 @@ static func world_to_fixed(world: float) -> int:
 static func fixed_to_world(fx: int) -> float:
 	return float(fx) / POS_SCALE
 
-## 定点 ↔ 格坐标（世界×2 → 格；0..95）
+## 定点 ↔ 格坐标（世界 ×GRID_CELL → 格；0..95）
+## 注意方向：世界→格是**乘** GRID_CELL（1 单位 = 2 格），不是除。
+## 原来写成 fx/(POS_SCALE×GRID_CELL) 等于又除了一次 2 —— 整体差 4 倍，
+## 出生点 (36.22, 36.22) 会被算到格 (18, 18)，四人圆盘全挤在一角。
+## 向下取整而不是四舍五入：问的是「这个坐标落在哪一格」。
+## 用 div_round 的话格中心（.5 位置）会被算进下一格，round-trip 差 1。
 static func fixed_to_grid(fx: int) -> int:
-	return clamp_i(div_round(fx, POS_SCALE * GRID_CELL), 0, GRID - 1)
+	return clamp_i(fx * GRID_CELL / POS_SCALE, 0, GRID - 1)
 
 static func grid_to_fixed_center(g: int) -> int:
-	## 格中心的世界坐标 → 定点（+0.5 格偏移）
-	return (g * GRID_CELL + 1) * POS_SCALE
+	## 格中心：世界 (g + 0.5) / GRID_CELL → 定点。g=0 → 世界 0.25，g=95 → 世界 47.75。
+	return div_round((2 * g + 1) * POS_SCALE, 2 * GRID_CELL)
 
 ## 角度
 static func angle_to_uint16(angle_rad: float) -> int:

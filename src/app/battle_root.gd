@@ -4,10 +4,14 @@
 ## - 地盘：TerritoryGrid（core）← TerritoryRenderer（表现）；ACK 纪律见 T0005M07F02
 ## - 收包分发：Snapshot/Delta/ScoreTick/事件（事件只驱动表现，不改状态）
 
-extends Node2D
+extends Node3D
 
 const INPUT_INTERVAL_S := 0.05     # 20 Hz
 const REDUNDANT_FRAMES := 3        # T0001M02F04
+const INTERACT_RANGE := 1.5        # 与权威 local_authority.KNOB_INTERACT_RANGE 同值
+
+var _vault_elapsed := 0.0
+
 
 var app: Node = null
 var transport: ISoupTransport = null
@@ -29,15 +33,15 @@ var characters := {}               # player_id → Character
 var walls: Array = []
 var pallets: Array = []
 var vaults: Array = []
+var drops := {}                    # drop_id → Drop 节点
 
 # 输入
 var _input_acc := 0.0
 var _input_seq := 0
 var _input_history: Array = []     # 最近 3 帧（最新在前）
 var _stick_move := Vector2.ZERO    # -1..1
-var _stick_aim := Vector2.ZERO
 var _charging := false
-var _attack_pending := false
+var _action_pending := false       # 万能键短按：情境动作（翻窗/推板/挥击）
 
 var _match_data: Dictionary = {}
 var map_data: Dictionary = {}
@@ -85,19 +89,10 @@ func begin_match(p_app: Node, match_start: Dictionary, keyframe: PackedByteArray
 
 
 func _build_world() -> void:
-	# 汤底占位（层序 1）
-	var bg := Polygon2D.new()
-	var pts := PackedVector2Array()
-	var r := MapData.POT_RADIUS
-	for i in range(48):
-		var a := TAU * i / 48.0
-		pts.append(MapData.CENTER + Vector2(cos(a), sin(a)) * r)
-	bg.polygon = pts
-	bg.color = Color(0.72, 0.55, 0.36, 0.55)
-	bg.z_index = 1
-	add_child(bg)
+	# 场景环境:汤锅 + 厨房背景 + 打光 + 蒸汽(3D,原 2D 汤底占位的正式替代)
+	EnvBuilder.build(self)
 
-	# 地盘场（层序 2）
+	# 地盘场(汤面)
 	renderer = TerritoryRenderer.new()
 	renderer.name = "TerritoryRenderer"
 	renderer.setup(grid)
@@ -116,7 +111,7 @@ func _build_world() -> void:
 		pallets.append(pallet)
 	for v in map_data.vaults:
 		var vault := Vault.new()
-		vault.setup(v.id, v.kind, Vector2(v.x, v.y))
+		vault.setup(v.id, v.kind, Vector2(v.x, v.y), v.get("angle", 0.0))
 		add_child(vault)
 		vaults.append(vault)
 
@@ -139,13 +134,35 @@ func _build_hud() -> void:
 	layer.add_child(hud)
 	add_child(layer)
 	hud.call("setup", self, grid, match_state, me_id)
+	_build_desktop_input(layer)
+
+
+## 电脑端调试输入（P0 开发期）：非触屏设备才挂，触屏摇杆路径不受影响。
+func _build_desktop_input(layer: CanvasLayer) -> void:
+	if DisplayServer.is_touchscreen_available():
+		return
+	var dbg := preload("res://src/app/desktop_input.gd").new()
+	dbg.name = "DesktopInput"
+	dbg.setup(self)
+	add_child(dbg)
+	# 键位提示（调试用，右下角）
+	var hint := Label.new()
+	hint.text = "WASD 移动 · 左键/空格：短按=翻窗/推板/挥击，长按=铺汤 · Tab 调参"
+	hint.add_theme_font_size_override("font_size", 18)
+	hint.modulate = Color(1, 1, 1, 0.55)
+	hint.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	hint.position = Vector2(-760, -44)
+	layer.add_child(hint)
 
 
 func _spawn_character(p: Dictionary) -> void:
 	var ch := Character.new()
 	var color := _player_color(p.player_id)
 	var dark := _player_dark(p.player_id)
-	ch.setup(p.player_id, p.ingredient_id, color, dark)
+	var nick: String = p.get("nickname", "")
+	if nick.strip_edges().is_empty():
+		nick = "P%d" % p.player_id
+	ch.setup(p.player_id, p.ingredient_id, color, dark, nick, p.player_id == me_id)
 	ch.position = Vector2(p.spawn_x / 64.0, p.spawn_y / 64.0)
 	add_child(ch)
 	characters[p.player_id] = ch
@@ -155,19 +172,19 @@ func _spawn_character(p: Dictionary) -> void:
 
 func _player_color(player_id: int) -> Color:
 	match player_id:
-		1: return Color(0.949, 0.565, 0.608)
-		2: return Color(0.180, 0.604, 0.525)
-		3: return Color(1.0, 0.824, 0.118)
-		4: return Color(0.545, 0.361, 0.839)
+		1: return Color(0.720, 0.300, 0.200)
+		2: return Color(0.440, 0.550, 0.250)
+		3: return Color(0.840, 0.630, 0.250)
+		4: return Color(0.500, 0.360, 0.530)
 	return Color.WHITE
 
 
 func _player_dark(player_id: int) -> Color:
 	match player_id:
-		1: return Color(0.753, 0.337, 0.416)
-		2: return Color(0.090, 0.369, 0.322)
-		3: return Color(0.780, 0.588, 0.000)
-		4: return Color(0.337, 0.200, 0.580)
+		1: return Color(0.500, 0.190, 0.120)
+		2: return Color(0.290, 0.380, 0.160)
+		3: return Color(0.600, 0.430, 0.140)
+		4: return Color(0.330, 0.230, 0.370)
 	return Color.GRAY
 
 
@@ -199,7 +216,113 @@ func _process(delta: float) -> void:
 			me_ch.position = prediction.get_render_pos()
 	# 摄像机档位
 	if me_ch != null:
-		camera.update_tier(match_state.my_area_permyriad())
+		camera.update_area(match_state.my_area_permyriad())
+	_update_leader()
+	_update_action_hint()
+	_update_range_hint()
+	_update_vault_progress(delta)
+
+
+## 翻窗进度环。
+## 进度不在协议里 —— 客户端按 FLAG_VAULTING 起停，用 Sim.vault_time_for_area
+## 推算的**预计时长**自己走一圈。这样单机和联网走同一条路，不用改协议。
+func _update_vault_progress(delta: float) -> void:
+	var vaulting := match_state.is_vaulting(me_id)
+	if not vaulting:
+		_vault_elapsed = 0.0
+		for v in vaults:
+			v.set_progress(0.0)
+		return
+	_vault_elapsed += delta
+	var total := maxf(0.05, Sim.vault_time_for_area(match_state.my_area_permyriad()))
+	var me := _my_character()
+	if me == null:
+		return
+	var nearest := _nearest_vault_node()
+	for v in vaults:
+		v.set_progress(clampf(_vault_elapsed / total, 0.0, 1.0) if v == nearest else 0.0)
+
+
+## 射程指示：谁进了我的攻击距离，谁脚下亮圈。
+## 自动锁定之后玩家不用瞄，但**必须判断「够不够得着」**——
+## 射程外出手就是挥空、吃 700ms 长后摇。没有这个指示，距离博弈会退化成抽奖。
+func _update_range_hint() -> void:
+	var me := _my_character()
+	if me == null:
+		return
+	var reach := Sim.attack_range_for_area(match_state.my_area_permyriad())
+	var dead := match_state.is_dead(me_id)
+	for pid in characters:
+		if pid == me_id:
+			continue
+		var ch: Character = characters[pid]
+		if ch.has_method("set_in_reach"):
+			ch.set_in_reach(not dead and not match_state.is_dead(pid)
+				and me.position.distance_to(ch.position) <= reach)
+
+
+## 离我最近的窗（2 单位内），没有返回 null
+func _nearest_vault_node() -> Node:
+	var me := _my_character()
+	if me == null:
+		return null
+	var nearest: Node = null
+	var best := 2.0
+	for v in vaults:
+		var d: float = me.position.distance_to(v.position)
+		if d < best:
+			best = d
+			nearest = v
+	return nearest
+
+
+## 万能键是情境键：走近哪个，就高亮哪个，并在它头上写清楚按下去会发生什么。
+## 不做这一层的话，玩家按键前无法预判 —— 「我想推板结果翻了窗」是最挫败的一类失败。
+## 判定与权威 _step_interact 同一条：范围 1.5 单位内，就近取窗或板。
+func _update_action_hint() -> void:
+	var me := _my_character()
+	var near_v: Node = null
+	var near_p: Node = null
+	if me != null and not match_state.is_dead(me_id):
+		var best := INTERACT_RANGE
+		for v in vaults:
+			var d: float = me.position.distance_to(v.position)
+			if d <= best:
+				best = d
+				near_v = v
+				near_p = null
+		for pl in pallets:
+			if pl.state != 0:
+				continue
+			var d2: float = me.position.distance_to(pl.position)
+			if d2 <= best:
+				best = d2
+				near_p = pl
+				near_v = null
+	for v in vaults:
+		v.set_highlight(v == near_v)
+	for pl in pallets:
+		pl.set_highlight(pl == near_p)
+
+
+
+
+## 领先者标记（👑 + 名字染金）。
+## 围攻要能自发发生，前提是「谁最肥」一眼可见 —— 打死他，他的地盘化回原汤给大家分。
+func _update_leader() -> void:
+	var leader := 0
+	var best := -1
+	for pid in characters:
+		if match_state.is_dead(pid):
+			continue
+		var a := match_state.area_permyriad_of(pid)
+		if a > best:
+			best = a
+			leader = pid
+	for pid in characters:
+		var ch: Character = characters[pid]
+		if ch.has_method("set_leader"):
+			ch.set_leader(pid == leader)
 
 
 func _run_input_tick() -> void:
@@ -212,9 +335,9 @@ func _run_input_tick() -> void:
 	var buttons := 0
 	if _charging:
 		buttons |= MsgIds.BUTTON_CHARGE
-	if _attack_pending:
-		buttons |= MsgIds.BUTTON_ATTACK
-	_attack_pending = false
+	if _action_pending:
+		buttons |= MsgIds.BUTTON_ACTION
+	_action_pending = false
 	var frame := {"move_x": move_x, "move_y": move_y, "aim": aim, "buttons": buttons}
 	_input_history.push_front(frame)
 	if _input_history.size() > REDUNDANT_FRAMES:
@@ -275,10 +398,40 @@ func get_charge_progress() -> float:
 	return clampf(float(n) / 400.0, 0.0, 1.0)
 
 
+## 朝向不再由玩家控制（元气骑士式自动锁定）：
+## 优先朝最近的活着的对手，没有对手就朝移动方向，都没有就保持当前朝向。
+## 这里算出来的 aim 只用于**表现**（角色朝向、挥击动画）；
+## 命中判定由权威自己重新锁目标，不信客户端这个值。
 func _aim_angle() -> float:
-	if _stick_aim.length_squared() > 0.01:
-		return _stick_aim.angle()
-	return _my_character().rotation if _my_character() != null else 0.0
+	var me := _my_character()
+	if me == null:
+		return 0.0
+	var target = _nearest_enemy_pos()
+	if target != null:
+		var d: Vector2 = target - me.position
+		if d.length_squared() > 0.0001:
+			return d.angle()
+	if _stick_move.length_squared() > 0.01:
+		return _stick_move.angle()
+	return me.rotation
+
+
+## 最近的活着的对手位置（没有返回 null）
+func _nearest_enemy_pos():
+	var me := _my_character()
+	if me == null:
+		return null
+	var best = null
+	var best_d := 1e9
+	for pid in characters:
+		if pid == me_id or match_state.is_dead(pid):
+			continue
+		var ch: Character = characters[pid]
+		var d := me.position.distance_to(ch.position)
+		if d < best_d:
+			best_d = d
+			best = ch.position
+	return best
 
 
 # ══ 收包分发（app 转发）═══════════════════════════════════════════════════
@@ -309,9 +462,7 @@ func on_server_message(msg_id: int, body: PackedByteArray) -> void:
 			if st.size() > 0:
 				if hud != null and hud.has_method("on_score_tick"):
 					hud.call("on_score_tick", st)
-		MsgIds.PLAYER_DIED, MsgIds.PLAYER_RESPAWN, MsgIds.PALLET_DOWN,
-		MsgIds.DROP_SPAWN, MsgIds.DROP_TAKEN, MsgIds.VAULT_START,
-		MsgIds.VAULT_END, MsgIds.STIR_WARN, MsgIds.STIR_SWEEP:
+		MsgIds.PLAYER_DIED, MsgIds.PLAYER_RESPAWN, MsgIds.PALLET_DOWN, MsgIds.DROP_SPAWN, MsgIds.DROP_TAKEN, MsgIds.VAULT_START, MsgIds.VAULT_END, MsgIds.STIR_WARN, MsgIds.STIR_SWEEP:
 			_handle_event(msg_id, body)
 
 
@@ -335,10 +486,11 @@ func _apply_snapshot(snap: Dictionary) -> void:
 		if p.player_id == me_id:
 			if _solo_mode:
 				ch.set_visual_state(Vector2(p.pos_x / 64.0, p.pos_y / 64.0),
-					Fixed.uint16_to_angle(p.aim), p.state_flags, p.hp, p.mass)
+					Fixed.uint16_to_angle(p.aim), p.state_flags, p.hp, p.mass,
+					p.get("atk_cd_ms", 0))
 			else:
 				ch.set_visual_state(prediction.get_render_pos(), Fixed.uint16_to_angle(p.aim),
-					p.state_flags, p.hp, p.mass)
+					p.state_flags, p.hp, p.mass, p.get("atk_cd_ms", 0))
 		else:
 			_remote_snapshots[p.player_id] = {
 				"pos": Vector2(p.pos_x / 64.0, p.pos_y / 64.0),
@@ -347,7 +499,7 @@ func _apply_snapshot(snap: Dictionary) -> void:
 				"flags": p.state_flags, "hp": p.hp, "mass": p.mass,
 			}
 			ch.set_visual_state(ch.position, _remote_snapshots[p.player_id].aim,
-				p.state_flags, p.hp, p.mass)
+				p.state_flags, p.hp, p.mass, p.get("atk_cd_ms", 0))
 
 
 func _interpolate_remotes(delta: float) -> void:
@@ -378,6 +530,27 @@ func _handle_event(msg_id: int, body: PackedByteArray) -> void:
 			var ch: Character = characters.get(ev.get("player_id", -1))
 			if ch != null:
 				ch.set_invuln(1.5)
+		MsgIds.DROP_SPAWN:
+			var did: int = ev.get("drop_id", -1)
+			if did >= 0 and not drops.has(did):
+				var dn := Drop.new()
+				dn.setup(did, ev.get("type", 0),
+					Vector2(ev.get("pos_x", 0) / 64.0, ev.get("pos_y", 0) / 64.0))
+				add_child(dn)
+				drops[did] = dn
+		MsgIds.DROP_TAKEN:
+			var tid: int = ev.get("drop_id", -1)
+			var taker: int = ev.get("player_id", 0)
+			# 效果名从节点上取 —— DROP_TAKEN 只带 dropId + playerId，不带种类
+			var kind := -1
+			if drops.has(tid):
+				kind = drops[tid].kind
+				drops[tid].play_taken()
+				drops.erase(tid)
+			# 拾取反馈：捡到的人头顶飘一下效果名
+			var tch: Character = characters.get(taker)
+			if kind >= 0 and tch != null and tch.has_method("show_tip"):
+				tch.show_tip(Drop.label_for(kind))
 		MsgIds.STIR_WARN:
 			stir.announce_warn(ev.get("fire_tick", 0), ev.get("entry_angle", 0), ev.get("arc_span", 0))
 		MsgIds.STIR_SWEEP:
@@ -392,8 +565,10 @@ func set_move_stick(v: Vector2) -> void:
 		_stick_move = Vector2.ZERO
 
 
-func set_aim_stick(v: Vector2) -> void:
-	_stick_aim = v.limit_length(1.0)
+## 朝向已改为自动锁定，右摇杆的瞄准输入不再参与计算。
+## 保留空实现是因为触屏 stick_aim 还在调它（那套控件待重做）。
+func set_aim_stick(_v: Vector2) -> void:
+	pass
 
 
 func set_charging(c: bool) -> void:
@@ -403,11 +578,18 @@ func set_charging(c: bool) -> void:
 		ch.set_charge_ring(c, 1.0)
 
 
-func queue_attack() -> void:
-	_attack_pending = true
+## 万能键短按：投递「情境动作」意图。
+## 到底是翻窗、推板还是挥击，由权威按距离分发（客户端不预判，避免和权威不一致）。
+func queue_action() -> void:
+	_action_pending = true
 	var ch := _my_character()
 	if ch != null:
 		ch.play_swing()
+
+
+## 旧接口保留：触屏摇杆那套还在调（触屏交互控件待重做）
+func queue_attack() -> void:
+	queue_action()
 
 
 func on_unhandled_input(event: InputEvent) -> void:
