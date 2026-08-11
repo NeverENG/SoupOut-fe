@@ -2,8 +2,17 @@
 """verify_proto.py — 协议字节布局验证（不依赖 Godot，独立复核 codec/ByteWriter 语义）
 对应 T0001M02 冻结契约。文档中的算术笔误在此标注：
   - PlayerInput 总长 30B（文档写 33B；字段 i8+i8+u16+u8 = 5B/帧）
-  - Snapshot 每玩家 13B（文档写 14B/player；字段求和 13B）
+  - Snapshot 每玩家 14B（13B 原字段 + attackCdMs10 u8，正好回到文档的 14B/player）
   - UDP 包头 16B（文档写 14B；magic+version+flags+conn_id+seq+ack+ack_bits 求和 16B）
+⚠️ 这个脚本只验证「客户端自己前后一致」，**不代表能和服务端对上**。
+   PlayerInput 目前是客户端 30B 平铺（lastRecvSnapshotTick 用 u32），
+   而服务端按 BanNet SDK 契约收：8B 头（clientTick u32 · inputSeq u16 ·
+   lastRecvSnapshotTick **u16**）+ 20B body，整包 28B。
+   两边差 2 字节且字段错位，真连上服务端会把第一帧的 moveX 当成 frameCount。
+   下面那句 assert len(d) == 30 是照旧文档写的，它通过 ≠ 协议是对的。
+   决定以哪边为准之后，这里和 src/proto/codec.gd 要一起改。
+   （单机模式走 local_authority，碰不到这条，所以不阻塞 P0。）
+
 用法: python3 tools/verify_proto.py
 """
 import sys
@@ -78,7 +87,7 @@ def main():
     assert hd[0] == 0x50 and hd[1] == 0x5A, f"MAGIC 错位 {hd[:2].hex()}"
     assert hd[8:10] == b"\x07\x00", "seq 错位"
 
-    # 3) 0x0C0 Snapshot：头部 7B + 4玩家×13B = 59B
+    # 3) 0x0C0 Snapshot：头部 7B + 4玩家×14B = 63B
     s = W()
     s.u32(50)
     s.u16(42)
@@ -93,7 +102,8 @@ def main():
         s.u16(1000)
         s.u8(0)
         s.u8(100)
-    assert len(s.data()) == 59, f"Snapshot={len(s.data())}B 期望 59B"
+        s.u8(0)          # attackCdMs10（攻击冷却剩余 / 10ms）
+    assert len(s.data()) == 63, f"Snapshot={len(s.data())}B 期望 63B"
 
     # 4) 0x040 MatchStart：头部 13B + 4玩家×22B = 101B
     m = W()
@@ -119,7 +129,7 @@ def main():
     k.u8(0)
     assert len(k.data()) == 9, f"keyframe={len(k.data())}B 期望 9B"
 
-    print("✅ 协议字节布局验证通过：PlayerInput=30B / UDP包头=16B / Snapshot=59B / MatchStart=101B / keyframe=9B")
+    print("✅ 协议字节布局验证通过：PlayerInput=30B / UDP包头=16B / Snapshot=63B / MatchStart=101B / keyframe=9B")
     sys.exit(0)
 
 

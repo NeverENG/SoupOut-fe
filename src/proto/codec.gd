@@ -222,7 +222,8 @@ static func encode_player_input(client_tick: int, input_seq: int, frames: Array,
 static func decode_snapshot(body: PackedByteArray) -> Dictionary:
 	## serverTick u32 · ackInputSeq u16 · playerCount u8
 	## [per player] playerId u8 · posX u16 · posY u16 · velX i8 · velY i8 · aimAngle u16 · mass u16 · stateFlags u8 · hp u8
-	## 每玩家 13B（T0001M02F05 的 "14 B/player" 为文档笔误，字段求和 = 13B）
+	## 每玩家 14B：13B 原字段 + attackCdMs10 u8（攻击冷却剩余，单位 10ms）
+	## —— 加上冷却之后正好等于 T0001M02F05 文档写的 14 B/player。
 	var r := ByteReader.new(body)
 	if body.size() < 7:
 		drop_count += 1
@@ -234,7 +235,7 @@ static func decode_snapshot(body: PackedByteArray) -> Dictionary:
 		"players": [],
 	}
 	for i in range(d.player_count):
-		if r.remaining() < 13:
+		if r.remaining() < 14:
 			drop_count += 1
 			return {}
 		d.players.append({
@@ -247,6 +248,7 @@ static func decode_snapshot(body: PackedByteArray) -> Dictionary:
 			"mass": r.read_u16(),
 			"state_flags": r.read_u8(),
 			"hp": r.read_u8(),
+			"atk_cd_ms": r.read_u8() * 10,     # 攻击冷却剩余（编码单位 10ms）
 		})
 	return d
 
@@ -284,11 +286,17 @@ static func decode_score_tick(body: PackedByteArray) -> Dictionary:
 	if body.size() < 12:
 		drop_count += 1
 		return {}
+	# ⚠️ 顺序必须是 tick 在前。原来这里先读 4 个 u16 再读 u32，
+	# 与编码端（local_authority._emit_score / 服务端 room）和上面那行文档都相反，
+	# 结果 ratios = [tick低16位, tick高16位, p1面积, p2面积] ——
+	# 面积条上「我」那一段显示的是 tick 数值，p3/p4 永远不显示。
+	# verify_proto.py 没覆盖 0x0C2，所以一直没被抓到。
 	var r := ByteReader.new(body)
+	var server_tick := r.read_u32()
 	var ratios := PackedInt32Array()
 	for i in range(4):
 		ratios.append(r.read_u16())
-	return {"server_tick": r.read_u32(), "ratios": ratios}
+	return {"server_tick": server_tick, "ratios": ratios}
 
 
 ## 解码 0x0C3 TerritoryKeyframe：返回 {server_tick, runs: [{length, owner}]}

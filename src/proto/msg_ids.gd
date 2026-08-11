@@ -53,10 +53,16 @@ const STIR_WARN := 0x107
 const STIR_SWEEP := 0x108
 
 # ── 按钮位（T0001M02F04：buttons u8）───────────────────────────────────────
-const BUTTON_ATTACK := 1             # bit0 攻击
+const BUTTON_ATTACK := 1             # bit0 —— 现在的语义是「万能动作」，见下
 const BUTTON_CHARGE := 2             # bit1 充能扩张（按住语义！）
-const BUTTON_INTERACT := 4           # bit2 交互（板/窗）
+const BUTTON_INTERACT := 4           # bit2 交互（旧三键方案遗留，客户端不再发；权威仍兼容）
 const BUTTON_SKILL := 8              # bit3 技能（预留）
+
+## 万能动作位。操作已收敛成「摇杆 + 万能键」两个控件：
+##   短按 → BUTTON_ACTION，权威按「近窗翻窗 > 近板推板 > 否则挥击」分发
+##   长按 → BUTTON_CHARGE
+## 线上仍复用 bit0，协议字节布局不变（T0001M02F04 无需改版）。
+const BUTTON_ACTION := BUTTON_ATTACK
 
 # ── stateFlags 位（T0001M02F05 Snapshot）────────────────────────────────────
 const FLAG_CHARGING := 1             # bit0 充能中
