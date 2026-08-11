@@ -1,6 +1,6 @@
-# Godot 4 缓存与导入产物
+# Godot 4 本地导入缓存（.godot/ 不入库）
+# .import 是资源导入配置，需要入库；否则新环境直接运行会因资源未导入而启动失败
 .godot/
-*.import
 
 # macOS
 .DS_Store
