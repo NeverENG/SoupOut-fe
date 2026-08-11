@@ -54,6 +54,9 @@ func _test_codec_roundtrip() -> bool:
 		return false
 	if r.read_i8() != 100 or r.read_i8() != -50 or r.read_u16() != 16384 or r.read_u8() != 2:
 		return false
+	# 剩下 2 帧冗余也要读掉，否则读到的"baseline"其实是第 2 帧的字节
+	for _i in range(2):
+		r.read_i8(); r.read_i8(); r.read_u16(); r.read_u8()
 	if r.read_u32() != 100 or r.read_u32() != 200:
 		return false
 	# MatchStart roundtrip
@@ -68,7 +71,8 @@ func _test_codec_roundtrip() -> bool:
 	w.write_u8(4)
 	for i in range(4):
 		w.write_u8(i + 1); w.write_u16(1000 + i); w.write_u16(1000 + i)
-		w.write_i8(0); w.write_i8(0); w.write_u16(0); w.write_u16(1000); w.write_u8(0); w.write_u8(100)
+		w.write_i8(0); w.write_i8(0); w.write_u16(0); w.write_u16(1000)
+		w.write_u8(0); w.write_u8(100); w.write_u8(0)   # 末位 = attackCdMs10（每玩家 14B）
 	var snap := codec.decode_snapshot(w.data())
 	if snap.get("server_tick", 0) != 50 or snap.get("ack_input_seq", 0) != 42:
 		return false
@@ -212,7 +216,7 @@ func _test_reassembly() -> bool:
 		chunks.append(payload.slice(i * 700, mini(2000, (i + 1) * 700)))
 	var done := PackedByteArray()
 	for i in range(frag_cnt):
-		var r := ra.feed(7, i, frag_cnt, chunks[i], 1000.0)
+		var r = ra.feed(7, i, frag_cnt, chunks[i], 1000.0)
 		if r.size() > 0:
 			done = r
 	if done.size() != 2000:
@@ -220,8 +224,8 @@ func _test_reassembly() -> bool:
 	for i in range(2000):
 		if done[i] != (i & 0xFF):
 			return false
-	# 畸形：frag_cnt 超限 → null
-	var bad = ra.feed(8, 0, 9, PackedByteArray([1]), 1000.0)
+	# 畸形：frag_cnt 超限（>64，与引擎 MAX_FRAGMENTS 一致）→ null
+	var bad = ra.feed(8, 0, 65, PackedByteArray([1]), 1000.0)
 	if bad != null:
 		return false
 	return true
@@ -239,13 +243,17 @@ func _test_prediction_reconcile() -> bool:
 	var moved := p.auth_x
 	if moved <= 1000:
 		return false
-	# 服务端 ack seq=1 且位置有偏差（1000+2 世界单位内不算）→ 用大偏差测试回滚
+	# 一步的位移量（speed 6.0 → 384 定点 = 6 世界单位/s ÷ 20Hz × 64）
+	var per_step := (moved - 1000) / 3
+	# 服务端 ack seq=1 且位置有偏差 → 硬置权威 + 重放 seq 2..3
 	p.reconcile(1, 1000, 1000, speed)
-	# 回滚后应从权威位置重放 seq 2..3
 	if p.auth_x <= 1000:
 		return false
-	if absi(p.auth_x - 1000) > 64:
-		return false   # 重放 2 tick 后应接近权威+2步
+	# 重放 2 步，容差 1 个定点单位（原来写 64 —— 那是 1 个世界单位，
+	# 比一步的位移还小，任何正确实现都过不了）
+	if absi(p.auth_x - (1000 + per_step * 2)) > 1:
+		print("  重放后 auth_x=%d 期望≈%d（每步 %d）" % [p.auth_x, 1000 + per_step * 2, per_step])
+		return false
 	return true
 
 
