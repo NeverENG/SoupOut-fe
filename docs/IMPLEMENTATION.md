@@ -58,6 +58,12 @@
 3. **Ch2 每 datagram 至多一条帧**：`T0002M03` 的"同 datagram 合并多条"仅适用于 Ch0/Ch1；Ch2 可靠帧独立 datagram（否则接收端墓碑去重会丢同 datagram 第二条 Ch2 帧）。
 4. **Ch2 有序的工程权衡**：先到先投（无握手序号同步下不做严格 HOL blocking），有序性由 ①墓碑去重（每 seq 至多投递一次）②ack 连续语义（RTO 补齐缺失）③关键消息 serverTick 防回退（Keyframe/FullState 拒绝旧 tick）三层保证。
 5. **P0 握手为明文直连占位**（`T0005M14F01`：T0002 握手包体格式未定），`connect_to` 发 flags.bit2 空包后直接置 OPEN。
+6. **Ch2 分片头以引擎实现为准（2026-08-11 修正）**：T0002M03F03 只说"仅 Ch2 支持分片"、格式留白，
+   本仓库原先自定 4B 头 `frag_id u16 · idx u8 · cnt u8`，与引擎 `src/reliable/fragment.rs` 的
+   **6B 头 `group_id u16 · first_seq u16 · frag_no u8 · frag_total u8`** 不一致 →
+   1125B 的 0x0C3 keyframe（超引擎 1100B 分片阈值）全部被判畸形丢弃，联机时客户端一格地盘都收不到。
+   已改为 6B（收发两侧）、`Reassembly.MAX_FRAG_CNT` 8→64（对齐引擎 `MAX_FRAGMENTS`），
+   并补上**未集齐的分片也要 `_recv_tracker.on_recv`**（每片是独立可靠帧，不记账则对端重传队列永不裁剪 → RTO 断连）。
 
 ---
 
@@ -104,3 +110,13 @@ make run       # 启动游戏：godot --path .
 - 单机原型：主菜单 → **单机试玩（P0）**，本地权威模拟服务端，验证"按住扩张/边界对抗/体型缩放"核心手感。
 - 调参：对局中 **Tab** 打开实时调参面板（expandRate/moveSpeed）。
 - 联网：连 Go 逻辑服经 soup-engine（`SettingsDb` 中 server_host/server_port，默认 127.0.0.1:12345）。
+- **联机验收**（4 客户端，需先起 Go 逻辑服 + BanNet 引擎，一键脚本见 `SoupOut-be/server/tools/e2e_multi.sh`）：
+
+  ```bash
+  godot --headless --path . -s res://tests/online_hold_probe.gd -- P1            # 无头
+  godot --path . -s res://tests/online_hold_probe.gd -- P1 /tmp/shot1.png        # 带窗口 + 截图
+  ```
+
+  `online_hold_probe.gd` 进局后驻留 15s 并合成输入（朝锅心走 + 充能），判据：
+  **快照里 4 人 · 快照 tick 推进 · 地盘 auth tick 推进 · ≥2 个远端玩家位置变化 ·（带窗口时）环形像素采样出的脚下汤色 = 自己**。
+  旧的 `online_probe.gd` 只判"收到 1 帧快照"，属连通性冒烟 —— 地盘全丢、全员不动时它依然全绿。
