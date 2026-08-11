@@ -211,8 +211,11 @@ func _frag_and_send(seq: int, msg_id: int, body: PackedByteArray) -> void:
 	_frag_id = (_frag_id + 1) & 0xFFFF
 	var rc: ReliabilityChannel = _rel[MsgIds.CH_RELIABLE_ORDERED]
 	for i in range(frag_cnt):
+		# 6B 分片头，与引擎 fragment::encode_fragment 对齐（否则引擎侧 total 解成垃圾）。
+		# 本客户端所有分片共用一个可靠 seq（整组重发），故 first_seq = seq。
 		var w := ByteWriter.new(64)
 		w.write_u16(_frag_id)
+		w.write_u16(seq)
 		w.write_u8(i)
 		w.write_u8(frag_cnt)
 		var chunk := body.slice(i * chunk_len, mini(body.size(), (i + 1) * chunk_len))
@@ -304,9 +307,15 @@ func _parse_datagram(datagram: PackedByteArray) -> void:
 			return
 		var body := r.read_bytes(len)
 		if flags & FLAG_FRAG:
-			# 分片（Ch2）：body 前置分片头；重组完成用帧头真实 msg_id 分发
+			# 分片（Ch2）：body 前置 6B 分片头（引擎 reliable/fragment.rs 的格式，
+			# T0002M03F03 把分片格式留白 → 以引擎实现为准）：
+			#   group_id u16 · first_seq u16 · frag_no u8 · frag_total u8
+			# 每个分片是独立可靠帧（独立 seq / ack / 重传），因此**每片都要参与 ack 记账**，
+			# 否则未集齐的分片永不被确认 → 引擎重传队列不裁剪 → RTO 超限断连。
+			_recv_tracker.on_recv(peer_seq)
 			var fr := ByteReader.new(body)
 			var frag_id := fr.read_u16()
+			fr.read_u16()              # first_seq：引擎用于覆盖组内 seq 范围，客户端不需要
 			var frag_idx := fr.read_u8()
 			var frag_cnt := fr.read_u8()
 			var done = _reassembly.feed(frag_id, frag_idx, frag_cnt, fr.read_rest(),

@@ -55,7 +55,7 @@ func on_ack(ack: int, ack_bits_in: int) -> void:
 	for item in retrans:
 		if item.seq == ack:
 			continue   # 该 seq 已被确认
-		var bit := (ack - item.seq) & 0xFFFF
+		var bit: int = (ack - item.seq) & 0xFFFF
 		if bit > 0 and bit <= 32 and (ack_bits_in & (1 << (bit - 1))) != 0:
 			continue   # 在滑窗内且被确认
 		keep.append(item)
